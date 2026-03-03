@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
-import { Utensils, ClipboardList, Hash, RefreshCcw } from 'lucide-react';
+import React, { useState, useMemo, useRef } from 'react';
+import { Utensils, ClipboardList, Hash, RefreshCcw, Copy, Check, Image as ImageIcon } from 'lucide-react';
+import { toBlob } from 'html-to-image';
 
 const DEFAULT_DATA = `位置	員工編號	姓名	餐點
 6F	114203	yaohui	招牌排骨酥泡飯(大) $100
@@ -39,6 +40,9 @@ const DEFAULT_DATA = `位置	員工編號	姓名	餐點
 
 export default function App() {
   const [rawData, setRawData] = useState('');
+  const [copyingLoc, setCopyingLoc] = useState<string | null>(null);
+  const [copiedLoc, setCopiedLoc] = useState<string | null>(null);
+  const sectionRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   const mealStats = useMemo(() => {
     const locationCounts: Record<string, Record<string, number>> = {};
@@ -83,7 +87,6 @@ export default function App() {
       }
     });
 
-    // Sort locations (e.g., 6F, 5F) - usually descending for floor numbers
     const sortedLocations = Array.from(locations).sort((a, b) => b.localeCompare(a));
 
     const result = sortedLocations.map(loc => {
@@ -102,6 +105,36 @@ export default function App() {
 
     return { result, totalItems };
   }, [rawData]);
+
+  const handleCopyImage = async (location: string) => {
+    const element = sectionRefs.current.get(location);
+    if (!element) return;
+
+    setCopyingLoc(location);
+    try {
+      // Small delay to ensure UI state for "Copying..." is rendered if needed
+      // but html-to-image is quite fast.
+      const blob = await toBlob(element, {
+        backgroundColor: '#ffffff',
+        style: {
+          margin: '0',
+          padding: '0',
+        }
+      });
+
+      if (blob) {
+        const item = new ClipboardItem({ 'image/png': blob });
+        await navigator.clipboard.write([item]);
+        setCopiedLoc(location);
+        setTimeout(() => setCopiedLoc(null), 2000);
+      }
+    } catch (err) {
+      console.error('Failed to copy image:', err);
+      alert('複製圖片失敗，請嘗試手動截圖。');
+    } finally {
+      setCopyingLoc(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 p-4 md:p-8 font-sans">
@@ -158,29 +191,62 @@ export default function App() {
                 </div>
                 
                 {mealStats.result.map((group, gIdx) => (
-                  <section key={gIdx} className="bg-white rounded-xl border border-stone-200 shadow-sm overflow-hidden">
-                    <div className="bg-stone-800 px-6 py-3 flex justify-between items-center">
-                      <h2 className="text-sm font-bold tracking-widest text-white flex items-center gap-2">
-                        <ClipboardList className="w-4 h-4 text-orange-400" />
-                        {group.location} 統計結果
-                      </h2>
-                      <span className="text-xs font-medium text-stone-300">
-                        樓層小計: {group.total} 份
-                      </span>
+                  <div key={gIdx} className="space-y-2">
+                    <div className="flex justify-end pr-2">
+                      <button
+                        onClick={() => handleCopyImage(group.location)}
+                        disabled={copyingLoc === group.location}
+                        className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold bg-white hover:bg-stone-50 text-stone-600 rounded-lg transition-all border border-stone-200 shadow-sm disabled:opacity-50"
+                      >
+                        {copyingLoc === group.location ? (
+                          <>
+                            <RefreshCcw className="w-3.5 h-3.5 animate-spin" />
+                            <span>處理中...</span>
+                          </>
+                        ) : copiedLoc === group.location ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-500" />
+                            <span className="text-emerald-500">已複製圖片</span>
+                          </>
+                        ) : (
+                          <>
+                            <ImageIcon className="w-3.5 h-3.5 text-orange-500" />
+                            <span>複製為圖片</span>
+                          </>
+                        )}
+                      </button>
                     </div>
                     
-                    <div className="divide-y divide-stone-100">
-                      {group.meals.map((item, idx) => (
-                        <div key={idx} className="px-6 py-4 flex justify-between items-center hover:bg-stone-50 transition-colors">
-                          <span className="font-medium text-stone-800">{item.name}</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-2xl font-bold text-orange-600">{item.count}</span>
-                            <span className="text-stone-400 text-sm">份</span>
+                    <section 
+                      ref={(el) => {
+                        if (el) sectionRefs.current.set(group.location, el);
+                        else sectionRefs.current.delete(group.location);
+                      }}
+                      className="bg-white rounded-xl border border-stone-200 shadow-sm overflow-hidden"
+                    >
+                      <div className="bg-stone-800 px-6 py-3 flex justify-between items-center">
+                        <h2 className="text-sm font-bold tracking-widest text-white flex items-center gap-2">
+                          <ClipboardList className="w-4 h-4 text-orange-400" />
+                          {group.location} 統計結果
+                        </h2>
+                        <span className="text-xs font-medium text-stone-300">
+                          樓層小計: {group.total} 份
+                        </span>
+                      </div>
+                      
+                      <div className="divide-y divide-stone-100">
+                        {group.meals.map((item, idx) => (
+                          <div key={idx} className="px-6 py-4 flex justify-between items-center hover:bg-stone-50 transition-colors">
+                            <span className="font-medium text-stone-800">{item.name}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-2xl font-bold text-orange-600">{item.count}</span>
+                              <span className="text-stone-400 text-sm">份</span>
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
                 ))}
               </>
             ) : (
@@ -198,3 +264,4 @@ export default function App() {
     </div>
   );
 }
+
