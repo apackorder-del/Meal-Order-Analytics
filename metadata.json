@@ -1,0 +1,5 @@
+{
+  "name": "Meal Order Analytics",
+  "description": "A tool to parse and analyze office meal orders, providing quantity statistics and cost breakdowns.",
+  "requestFramePermissions": []
+}
