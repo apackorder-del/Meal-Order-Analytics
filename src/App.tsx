@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo, useRef } from 'react';
-import { Utensils, ClipboardList, Hash, RefreshCcw, Copy, Check, Image as ImageIcon } from 'lucide-react';
+import { Utensils, ClipboardList, Hash, RefreshCcw, Copy, Check, Image as ImageIcon, Layers, AlignJustify } from 'lucide-react';
 import { toBlob } from 'html-to-image';
 
 const DEFAULT_DATA = `位置	員工編號	姓名	餐點
@@ -42,10 +42,12 @@ export default function App() {
   const [rawData, setRawData] = useState('');
   const [copyingLoc, setCopyingLoc] = useState<string | null>(null);
   const [copiedLoc, setCopiedLoc] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'grouped' | 'combined'>('grouped');
   const sectionRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   const mealStats = useMemo(() => {
     const locationCounts: Record<string, Record<string, number>> = {};
+    const globalCounts: Record<string, number> = {};
     const locations = new Set<string>();
     let totalItems = 0;
     
@@ -79,6 +81,11 @@ export default function App() {
         
         items.forEach(item => {
           totalItems += 1;
+          
+          // Global
+          globalCounts[item] = (globalCounts[item] || 0) + 1;
+
+          // By Location
           if (!locationCounts[location]) {
             locationCounts[location] = {};
           }
@@ -103,7 +110,11 @@ export default function App() {
       };
     });
 
-    return { result, totalItems };
+    const globalMeals = Object.entries(globalCounts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+
+    return { result, globalMeals, totalItems };
   }, [rawData]);
 
   const handleCopyImage = async (location: string) => {
@@ -112,8 +123,6 @@ export default function App() {
 
     setCopyingLoc(location);
     try {
-      // Small delay to ensure UI state for "Copying..." is rendered if needed
-      // but html-to-image is quite fast.
       const blob = await toBlob(element, {
         backgroundColor: '#ffffff',
         style: {
@@ -136,6 +145,65 @@ export default function App() {
     }
   };
 
+  const renderSection = (location: string, meals: {name: string, count: number}[], total: number, title: string) => (
+    <div key={location} className="space-y-2">
+      <div className="flex justify-end pr-2">
+        <button
+          onClick={() => handleCopyImage(location)}
+          disabled={copyingLoc === location}
+          className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold bg-white hover:bg-stone-50 text-stone-600 rounded-lg transition-all border border-stone-200 shadow-sm disabled:opacity-50"
+        >
+          {copyingLoc === location ? (
+            <>
+              <RefreshCcw className="w-3.5 h-3.5 animate-spin" />
+              <span>處理中...</span>
+            </>
+          ) : copiedLoc === location ? (
+            <>
+              <Check className="w-3.5 h-3.5 text-emerald-500" />
+              <span className="text-emerald-500">已複製圖片</span>
+            </>
+          ) : (
+            <>
+              <ImageIcon className="w-3.5 h-3.5 text-orange-500" />
+              <span>複製為圖片</span>
+            </>
+          )}
+        </button>
+      </div>
+      
+      <section 
+        ref={(el) => {
+          if (el) sectionRefs.current.set(location, el);
+          else sectionRefs.current.delete(location);
+        }}
+        className="bg-white rounded-xl border border-stone-200 shadow-sm overflow-hidden"
+      >
+        <div className="bg-stone-800 px-6 py-3 flex justify-between items-center">
+          <h2 className="text-sm font-bold tracking-widest text-white flex items-center gap-2">
+            <ClipboardList className="w-4 h-4 text-orange-400" />
+            {title}
+          </h2>
+          <span className="text-xs font-medium text-stone-300">
+            小計: {total} 份
+          </span>
+        </div>
+        
+        <div className="divide-y divide-stone-100">
+          {meals.map((item, idx) => (
+            <div key={idx} className="px-6 py-4 flex justify-between items-center hover:bg-stone-50 transition-colors">
+              <span className="font-medium text-stone-800">{item.name}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-2xl font-bold text-orange-600">{item.count}</span>
+                <span className="text-stone-400 text-sm">份</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 p-4 md:p-8 font-sans">
       <div className="max-w-3xl mx-auto space-y-6">
@@ -145,7 +213,7 @@ export default function App() {
             <Utensils className="w-6 h-6 text-orange-600" />
             餐點數量統計
           </h1>
-          <p className="text-stone-500 text-sm mt-1">依樓層分組計算餐點總份數</p>
+          <p className="text-stone-500 text-sm mt-1">精確計算每一項餐點的總份數或依樓層分組</p>
         </header>
 
         <main className="grid gap-8">
@@ -180,9 +248,35 @@ export default function App() {
             />
           </section>
 
-          {/* Result Sections by Location */}
+          {/* Toggle View Mode */}
+          {mealStats.totalItems > 0 && (
+            <div className="flex justify-center">
+              <div className="bg-white border border-stone-200 p-1 flex rounded-xl shadow-sm">
+                <button
+                  onClick={() => setViewMode('grouped')}
+                  className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors ${
+                    viewMode === 'grouped' ? 'bg-orange-50 text-orange-600' : 'text-stone-500 hover:text-stone-700'
+                  }`}
+                >
+                  <Layers className="w-4 h-4" />
+                  分樓層統計
+                </button>
+                <button
+                  onClick={() => setViewMode('combined')}
+                  className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors ${
+                    viewMode === 'combined' ? 'bg-orange-50 text-orange-600' : 'text-stone-500 hover:text-stone-700'
+                  }`}
+                >
+                  <AlignJustify className="w-4 h-4" />
+                  全部合併統計
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Result Sections */}
           <div className="space-y-8">
-            {mealStats.result.length > 0 ? (
+            {mealStats.totalItems > 0 ? (
               <>
                 <div className="flex justify-end">
                   <span className="text-xs font-bold bg-orange-100 text-orange-700 px-3 py-1 rounded-full shadow-sm">
@@ -190,64 +284,13 @@ export default function App() {
                   </span>
                 </div>
                 
-                {mealStats.result.map((group, gIdx) => (
-                  <div key={gIdx} className="space-y-2">
-                    <div className="flex justify-end pr-2">
-                      <button
-                        onClick={() => handleCopyImage(group.location)}
-                        disabled={copyingLoc === group.location}
-                        className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold bg-white hover:bg-stone-50 text-stone-600 rounded-lg transition-all border border-stone-200 shadow-sm disabled:opacity-50"
-                      >
-                        {copyingLoc === group.location ? (
-                          <>
-                            <RefreshCcw className="w-3.5 h-3.5 animate-spin" />
-                            <span>處理中...</span>
-                          </>
-                        ) : copiedLoc === group.location ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-500" />
-                            <span className="text-emerald-500">已複製圖片</span>
-                          </>
-                        ) : (
-                          <>
-                            <ImageIcon className="w-3.5 h-3.5 text-orange-500" />
-                            <span>複製為圖片</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                    
-                    <section 
-                      ref={(el) => {
-                        if (el) sectionRefs.current.set(group.location, el);
-                        else sectionRefs.current.delete(group.location);
-                      }}
-                      className="bg-white rounded-xl border border-stone-200 shadow-sm overflow-hidden"
-                    >
-                      <div className="bg-stone-800 px-6 py-3 flex justify-between items-center">
-                        <h2 className="text-sm font-bold tracking-widest text-white flex items-center gap-2">
-                          <ClipboardList className="w-4 h-4 text-orange-400" />
-                          {group.location} 統計結果
-                        </h2>
-                        <span className="text-xs font-medium text-stone-300">
-                          樓層小計: {group.total} 份
-                        </span>
-                      </div>
-                      
-                      <div className="divide-y divide-stone-100">
-                        {group.meals.map((item, idx) => (
-                          <div key={idx} className="px-6 py-4 flex justify-between items-center hover:bg-stone-50 transition-colors">
-                            <span className="font-medium text-stone-800">{item.name}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-2xl font-bold text-orange-600">{item.count}</span>
-                              <span className="text-stone-400 text-sm">份</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  </div>
-                ))}
+                {viewMode === 'grouped' ? (
+                  mealStats.result.map((group) => 
+                    renderSection(group.location, group.meals, group.total, `${group.location} 統計結果`)
+                  )
+                ) : (
+                  renderSection('combined', mealStats.globalMeals, mealStats.totalItems, '合併統計結果')
+                )}
               </>
             ) : (
               <section className="bg-white rounded-xl border border-stone-200 shadow-sm p-12 text-center">
